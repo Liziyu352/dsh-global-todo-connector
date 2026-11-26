@@ -375,7 +375,7 @@ test('push sends only tagged, locally-changed, non-inbox todos', async (t) => {
 
   const sent = JSON.parse(await readFile(out, 'utf8'))
   assert.equal(sent.length, 1)
-  assert.equal(sent[0].title, 'ours')
+  assert.equal(sent[0].description, 'ours')  // task text goes as description
   assert.equal(sent[0].tags.includes('client:demo'), true)
 })
 
@@ -399,7 +399,7 @@ test('push does not resend an unchanged todo, but does resend an edited one', as
   const third = await engine.push(connector)
   assert.equal(third.pushed, 1)
   const sent = JSON.parse(await readFile(out, 'utf8'))
-  assert.equal(sent[0].title, 'b', 'a batch push always sends an array')
+  assert.equal(sent[0].description, 'b', 'a batch push always sends an array')
 })
 
 test('push honours a template tree in mapping.push', async (t) => {
@@ -460,9 +460,20 @@ client:
     connector,
     1000,
   )
-  assert.equal(payload.title, 'x')
-  assert.equal(payload.description, 'd')
-  assert.equal(payload.status, 'open')
+  // The task text goes out as `description` (TaskWarrior semantics); `title`
+  // is not sent at all — a `title` key with an empty description segfaults
+  // `task import` 2.6.2.
+  assert.equal(payload.description, 'x')
+  assert.equal(payload.notes, 'd')
+  assert.equal(payload.title, undefined)
+  // The default payload inverts the pull vocabulary: local `open` maps to the
+  // remote word `pending` via the push fallback.
+  assert.equal(payload.status, 'pending')
+  // Local `high` has no entry in the default pull priority map, so it goes
+  // through PRIORITY_PUSH_FALLBACK as `M`.
+  assert.equal(payload.priority, 'M')
+  // Nulls are omitted, not sent.
+  assert.equal('dueAt' in payload, false)
   assert.equal(payload.id, 'r1')
 })
 
