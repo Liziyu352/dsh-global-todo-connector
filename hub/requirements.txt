@@ -4,5 +4,9 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 
-# Test-only dependency. Install with:
-#   pip install -r hub/requirements.txt httpx==0.28.1 pytest==8.3.4
+# Used by the v2 outbound proxy (POST /v1/request) and the task-watcher's
+# instance callback; also the TestClient transport.
+httpx==0.28.1
+
+# Test-only extra. Install everything with:
+#   pip install -r hub/requirements.txt pytest==8.3.4

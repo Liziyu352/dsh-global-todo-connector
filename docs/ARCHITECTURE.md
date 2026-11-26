@@ -203,6 +203,18 @@ hub 是**可选的**，不装也能用。它的职责边界必须说清楚，因
 
 一句话：**hub 共享的是「怎么同步」，不是「同步什么」。**
 
+### 9.1 v2 之后：hub 可以站进链路（opt-in）
+
+v2 给上表加了三个可选代理，每个都要显式打开；不开时上表逐条仍然成立：
+
+| 能力 | 开关 | 边界变化 |
+| --- | --- | --- |
+| file-manager | 插件配置 `config.fileProxy: hub` | todos.json 读写经 hub（revision CAS）。hub 从「不存待办」变成「代管待办文件」；CAS 冲突退避重试，hub 不可达 fail-fast |
+| request 代理 | 连接器 `executor.via: hub` | REST 出站经 hub。hub 从「不发起外部请求」变成「代发请求」；作为交换拿到 SSRF 防护、`${secret:ALIAS}` 侧解析（明文凭据只存在 hub 的 secrets.json）、限流与审计 |
+| task-watcher | 连接器 `watcher: hub` | 调度权上交 hub，本机不设定时器（`everyMinutes` 强制 0）；hub 到期抢租约后回调本机 sync 接口 |
+
+设计依据与实现次序见 [DESIGN-v2.md](DESIGN-v2.md)。
+
 ## 10. 安全模型
 
 ### 10.1 插件自己的 HTTP 路由

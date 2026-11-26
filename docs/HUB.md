@@ -99,6 +99,12 @@ ssh -N -L 8765:127.0.0.1:8765 user@hub-host
 | `hub.instance` | `<hostname>/<pid>` | 标识实例身份。建议在多机部署时显式设成 `laptop` / `desktop` 这种名字，看租约和 revision 时更容易分辨 |
 | `hub.timeoutMs` | `8000` | 单次 hub 请求超时 |
 
+v2 新增插件配置项：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `config.fileProxy` | 空 | 设成 `hub` 时，todos.json 的读写改走 hub 的 file-manager（`lib/fileproxy.js`，revision CAS + 冲突重试）。**hub.url 未配置时插件直接拒绝构造（fail-fast）**——一半走代理一半走本地锁会弄坏 revision 记账，宁可报错也不静默回落。`dsh_connector_status` 的 `status.fileProxy` 字段显示当前模式 |
+
 ### 3.2 环境变量
 
 不想把 URL / token 写进配置（比如用 systemd 注入）时：
@@ -281,11 +287,25 @@ hub 上的 `hash` 是 `sha256(yaml)` 的前 16 位，用来判断「远端是否
 | 租约 | ✅ | 见第 4 节 |
 | 共享状态（`/v1/state/{connector}`） | ✅ | 任意 JSON，带 revision 乐观锁。**当前插件不读写它**——同步水位线仍只存本地 `state/<name>.state.json` |
 | 运行记录（`/v1/runs`） | ✅ | 每次 sync 一条，≤64 KiB |
-| **待办本身（todos.json）** | ❌ | 永远只在本地。多机同步待办用 dsh-global-todo 的 `sync.dir` |
-| 任何外部系统的凭据 | ❌ | token 只在插件进程的 `${env:…}` 里 |
+| files 表（v2） | ✅ | `todo-store` 的 revision 与 mtime；文档本体在 `--todo-store` 指向的文件里，hub 只记账 |
+| watchers 表（v2） | ✅ | 每连接器的 `everyMinutes`/`callbackUrl`/`instance`/`next_run_at` |
+| **待办本身（todos.json）** | ⚠️ v2 起 hub 可代管 | 见第 6.5 节；默认仍是"永远只在本地" |
+| 任何外部系统的凭据 | ❌（v1）/ ⚠️（v2 secrets.json） | v2 的 `${secret:ALIAS}` 明文存在 hub 的 `secrets.json`（0600），插件进程只见别名 |
 | 冲突合并逻辑 | ❌ | hub 只提供原语，策略在客户端 |
 
 hub 的数据是「可重建的缓存 + 共享状态」：连接器 YAML 的源头通常在 git 里，丢了 `hub.db` 不会丢待办本身，最多丢运行历史和 revision 记录。
+
+### 6.5 v2 的三个代理能力
+
+v2 起 hub 可以站进数据链路（全部显式 opt-in，默认行为与 v1 相同）：
+
+| 能力 | API | 插件侧开关 | 说明 |
+| --- | --- | --- | --- |
+| file-manager | `GET/PUT /v1/files/todo-store` | 插件配置 `config.fileProxy: hub` | todos.json 读写经 hub，revision CAS 防多实例踩踏；插件侧 `lib/fileproxy.js` 与本地 store 同接口；hub 不可达时 **fail-fast**，不静默回落 |
+| request 代理 | `POST /v1/request` | 连接器 `executor.via: hub` | REST 出站经 hub：SSRF 过滤（只放行公网地址）、`${secret:ALIAS}` 在 hub 的 `secrets.json` 解析、每连接器 60 次/分钟限流、审计进 runs（不记 header 值） |
+| task-watcher | `PUT/GET/DELETE /v1/watch/{connector}` | 连接器 `watcher: hub` | hub 后台每 30s 扫到期 watcher → 抢租约（instance=`watcher`）→ POST callback（带 `x-hub-token`）。插件侧不再设本地定时器，且解析期强制 `everyMinutes: 0` 防双重触发 |
+
+安全注意：`--todo-store` 让 hub 拿到 todos.json 的写权，`secrets.json` 让 hub 拿到下游凭据——**hub 从「旁边」变成「链路上」后，它的机器账号权限要按能改你全部待办、读你全部下游 token 来对待**。单机自用跑回环没问题；跨机部署务必设 token + SSH 隧道。
 
 ---
 
@@ -326,3 +346,4 @@ hub 的数据是「可重建的缓存 + 共享状态」：连接器 YAML 的源�
 - [`hub/README.md`](../hub/README.md)：hub 的完整文档（启动参数、systemd、Docker、API 细节、备份、故障排查、测试）
 - [CONNECTORS.md](CONNECTORS.md)：连接器 YAML 参考
 - [ARCHITECTURE.md](ARCHITECTURE.md)：整体设计与安全模型
+- [DESIGN-v2.md](DESIGN-v2.md)：v2 代理层的设计定稿与依据

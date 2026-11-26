@@ -4,6 +4,40 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — v2: hub proxy layer
+
+Implements [docs/DESIGN-v2.md](docs/DESIGN-v2.md). The hub graduates from a
+YAML share to a proxy between the todo store / downstream platforms and the
+harness. Everything is opt-in; with no hub configured the plugin behaves
+exactly as in 0.1.0.
+
+### Added
+
+- **File-manager** (`GET/PUT /v1/files/todo-store`): the hub can host the
+  todo store's JSON reads/writes with optimistic revision CAS. The plugin side
+  selects it with `config.fileProxy: hub` — `lib/fileproxy.js` implements the
+  same store interface (read/update/all/describe) with conflict retry. Fail
+  fast when the hub is missing: a half-proxied setup would corrupt revision
+  bookkeeping, so it refuses to start rather than silently falling back.
+- **Request proxy** (`POST /v1/request`): REST executors may declare
+  `executor.via: hub` so outbound HTTP goes through the hub, which enforces
+  SSRF filtering (public addresses only), resolves `${secret:ALIAS}` from its
+  own `secrets.json` (the plaintext token never enters the harness process),
+  rate-limits per connector, and audits every call into the run log without
+  recording header values.
+- **Task-watcher** (`PUT/GET/DELETE /v1/watch/{connector}`): a connector with
+  `watcher: hub` hands its interval to the hub's background watcher, which
+  grabs a lease and POSTs the connector's callback URL when due. Local timers
+  are suppressed for such connectors (double-trigger guard: `watcher: hub`
+  requires `schedule.everyMinutes: 0`, enforced at parse time).
+- Hub schema migrates in place (v1 → v2, new `files`/`watchers` tables), hub
+  version 0.2.0; `--todo-store` and `--no-watcher` CLI flags.
+
+### Tests
+
+- Node: 153 passing (was 136; +17 for fileproxy/via/watcher).
+- Hub: 63 passing (was 17; +46 for files/request/watcher/migration).
+
 ## [0.1.0] — 2026-11-25
 
 First release. The plugin is usable end to end: define a connector in YAML, let

@@ -78,7 +78,7 @@ def test_health_is_public_and_reports_counts(tmp_path: Path) -> None:
     assert body["ok"] is True
     data = body["data"]
     assert data["name"] == "dsh-global-todo-connector-hub"
-    assert data["version"] == "0.1.0"
+    assert data["version"] == "0.2.0"
     assert isinstance(data["uptimeSeconds"], int)
     assert data["connectors"] == 0
     assert data["activeLeases"] == 0

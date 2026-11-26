@@ -22,6 +22,7 @@ import ipaddress
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -43,9 +44,21 @@ from hub.store import (  # noqa: E402  (import after the sys.path bootstrap)
     LeaseHeld,
     clamp_ttl,
 )
+from hub.files import (  # noqa: E402
+    FileError,
+    FileManager,
+    UnknownFile,
+)
+from hub.request import ProxyError, RequestProxy  # noqa: E402
+from hub.watcher import (  # noqa: E402
+    WatcherError,
+    WatcherService,
+    clamp_every_minutes,
+    validate_callback_url,
+)
 
 HUB_NAME = "dsh-global-todo-connector-hub"
-HUB_VERSION = "0.1.0"
+HUB_VERSION = "0.2.0"
 
 # Bodies far above the documented limits are rejected from the header alone,
 # before Starlette buffers them in memory.
@@ -89,6 +102,27 @@ class RunCreate(BaseModel):
     run: dict[str, Any]
 
 
+class FilePut(BaseModel):
+    doc: Any
+    revision: int = Field(ge=0)
+
+
+class RequestProxyBody(BaseModel):
+    kind: str = "rest"
+    url: str
+    method: str = "GET"
+    headers: Optional[dict[str, Any]] = None
+    body: Any = None
+    timeoutMs: Optional[int] = None
+    success: Optional[list[int]] = None
+
+
+class WatchPut(BaseModel):
+    everyMinutes: int
+    callbackUrl: str
+    instance: str = Field(default="", max_length=200)
+
+
 # ---------------------------------------------------------------------------
 # Envelope helpers
 # ---------------------------------------------------------------------------
@@ -129,8 +163,16 @@ def _is_loopback(host: Optional[str]) -> bool:
 def create_app(
     data_dir: str | os.PathLike[str] | None = None,
     token: Optional[str] = None,
+    todo_store: Optional[str | os.PathLike[str]] = None,
+    enable_watcher: bool = True,
 ) -> FastAPI:
-    """Build a hub app.  ``token`` overrides ``GTC_HUB_TOKEN`` when not None."""
+    """Build a hub app.
+
+    ``token`` overrides ``GTC_HUB_TOKEN`` when not None; ``todo_store`` points
+    at the shared ``todos.json`` and enables the file-manager routes (they stay
+    disabled until it is set).  ``enable_watcher`` exists so tests and CLI
+    one-shots can run without the background thread.
+    """
 
     resolved_token = token if token is not None else os.environ.get("GTC_HUB_TOKEN", "")
     resolved_token = resolved_token or ""
@@ -141,6 +183,9 @@ def create_app(
     ).expanduser()
 
     store = Store(resolved_data)
+    files = FileManager(store, todo_store)
+    proxy = RequestProxy(store, resolved_data)
+    watcher = WatcherService(store, token=resolved_token)
     started_at = time.time()
 
     app = FastAPI(
@@ -152,6 +197,14 @@ def create_app(
     )
     app.state.store = store
     app.state.token = resolved_token
+    app.state.files = files
+    app.state.proxy = proxy
+    app.state.watcher = watcher
+
+    if enable_watcher:
+        app.add_event_handler("startup", watcher.start)
+        app.add_event_handler("shutdown", watcher.stop)
+        app.add_event_handler("shutdown", proxy.close)
 
     @app.middleware("http")
     async def limit_body_size(request: Request, call_next):
@@ -221,7 +274,22 @@ def create_app(
             409,
             "revision-conflict",
             f"revision 不匹配，当前 revision 为 {exc.current_revision}",
+            currentRevision=exc.current_revision,
         )
+
+    @app.exception_handler(FileError)
+    async def file_error_handler(request: Request, exc: FileError):
+        return fail(exc.status, exc.reason, str(exc))
+
+    @app.exception_handler(WatcherError)
+    async def watcher_error_handler(request: Request, exc: WatcherError):
+        return fail(exc.status, exc.reason, str(exc))
+
+    @app.exception_handler(ProxyError)
+    async def proxy_error_handler(request: Request, exc: ProxyError):
+        payload = {"ok": False, "reason": exc.reason, "error": str(exc)}
+        payload.update(exc.extra)
+        return JSONResponse(payload, status_code=exc.status)
 
     # -- health -------------------------------------------------------------
 
@@ -336,6 +404,64 @@ def create_app(
     ):
         return ok({"runs": store.list_runs(connector, limit)})
 
+    # -- file manager (v2) --------------------------------------------------
+
+    @app.get("/v1/files/{name}", dependencies=[Depends(require_auth)])
+    def get_file(name: str):
+        return ok(files.read(name))
+
+    @app.put("/v1/files/{name}", dependencies=[Depends(require_auth)])
+    def put_file(name: str, body: FilePut):
+        result = files.write(name, body.doc, body.revision)
+        return ok(result)
+
+    # -- request proxy (v2) -------------------------------------------------
+
+    @app.post("/v1/request", dependencies=[Depends(require_auth)])
+    def proxy_request(body: RequestProxyBody, request: Request):
+        if body.kind != "rest":
+            return fail(
+                422,
+                "invalid-request",
+                f"v2 只支持 kind='rest'，收到 {body.kind!r}",
+            )
+        connector = request.headers.get("x-connector", "") or "default"
+        payload = body.model_dump()
+        result = proxy.send(connector, payload)
+        return ok(result)
+
+    # -- task watcher (v2) --------------------------------------------------
+
+    @app.get("/v1/watch/{connector}", dependencies=[Depends(require_auth)])
+    def get_watch(connector: str):
+        entry = store.get_watcher(connector)
+        if entry is None:
+            return ok({"connector": connector, "watcher": None})
+        return ok({"connector": connector, "watcher": entry})
+
+    @app.put("/v1/watch/{connector}", dependencies=[Depends(require_auth)])
+    # §3.4 of DESIGN-v2.md spells this path with a `/subscription` suffix; keep
+    # it as an alias so either form works. Same handler, same table row.
+    @app.put("/v1/watch/{connector}/subscription", dependencies=[Depends(require_auth)])
+    def put_watch(connector: str, body: WatchPut):
+        connector = connector.strip()
+        if not connector or len(connector) > 200:
+            return fail(422, "invalid-name", "连接器名称必须为 1-200 个字符")
+        every = clamp_every_minutes(body.everyMinutes)
+        callback = validate_callback_url(body.callbackUrl)
+        instance = body.instance.strip()
+        # Schedule the first run one interval out: registering a watcher is not
+        # itself a reason to sync immediately, and it keeps a bulk registration
+        # from stampeding every connector at once.
+        next_run = _future_iso(every)
+        entry = store.put_watcher(connector, every, callback, instance, next_run)
+        return ok({"connector": connector, "watcher": entry})
+
+    @app.delete("/v1/watch/{connector}", dependencies=[Depends(require_auth)])
+    def delete_watch(connector: str):
+        deleted = store.delete_watcher(connector)
+        return ok({"deleted": deleted})
+
     # -- diagnostics --------------------------------------------------------
 
     @app.get("/v1/stats", dependencies=[Depends(require_auth)])
@@ -346,9 +472,11 @@ def create_app(
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat()
+
+
+def _future_iso(minutes: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
 
 
 def _encode_size(value: Any) -> int:
@@ -374,6 +502,17 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=None,
         help="shared token; overrides $GTC_HUB_TOKEN",
     )
+    parser.add_argument(
+        "--todo-store",
+        default=os.environ.get("GTC_HUB_TODO_STORE") or None,
+        help="path to the shared todos.json served by the file-manager API "
+        "(default: $GTC_HUB_TODO_STORE; unset disables those routes)",
+    )
+    parser.add_argument(
+        "--no-watcher",
+        action="store_true",
+        help="do not start the background task-watcher thread",
+    )
     return parser.parse_args(argv)
 
 
@@ -381,7 +520,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     import uvicorn
 
     args = _parse_args(argv)
-    application = create_app(data_dir=args.data, token=args.token)
+    application = create_app(
+        data_dir=args.data,
+        token=args.token,
+        todo_store=args.todo_store,
+        enable_watcher=not args.no_watcher,
+    )
 
     token = application.state.token
     if token:
@@ -390,7 +534,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         auth_mode = "no token configured; loopback clients only"
     print(f"[hub] {HUB_NAME} {HUB_VERSION} on http://{args.host}:{args.port}")
     print(f"[hub] data: {application.state.store.db_path}")
-    print(f"[hub] auth: {auth_mode}", flush=True)
+    print(f"[hub] auth: {auth_mode}")
+    if args.todo_store:
+        print(f"[hub] file-manager: todo-store -> {application.state.files.path}")
+    else:
+        print("[hub] file-manager: disabled (no --todo-store)")
+    print(
+        "[hub] watcher: " + ("disabled (--no-watcher)" if args.no_watcher else "enabled"),
+        flush=True,
+    )
 
     uvicorn.run(application, host=args.host, port=args.port, log_level="info")
 

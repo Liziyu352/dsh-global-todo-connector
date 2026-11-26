@@ -12,8 +12,25 @@ services:
       # which inside a container means almost nothing gets through.
       GTC_HUB_TOKEN: "${GTC_HUB_TOKEN:?set GTC_HUB_TOKEN in .env or the shell}"
       GTC_HUB_DATA: /data
+      # Optional: point the file-manager at a shared todos.json. Leave unset to
+      # keep /v1/files/* disabled.
+      GTC_HUB_TODO_STORE: "${GTC_HUB_TODO_STORE:-/todos/todos.json}"
     volumes:
       - hub-data:/data
+      # Mount the directory that holds todos.json. The file must already exist
+      # (the hub writes it atomically by rename, which needs a writable dir and
+      # a real filesystem, not a single-file bind mount).
+      - "${GTC_HUB_TODOS_DIR:-./todos}:/todos"
+    # The watcher thread needs outbound access to the DSH instances it pokes;
+    # disable it here if you schedule on the instance side instead.
+    command:
+      - python
+      - -m
+      - hub.app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
 
 volumes:
   hub-data:

@@ -183,6 +183,18 @@ hub 在**旁边**，不在数据链路里：todos.json 和外部系统之间的�
 
 垂直方向的数据流只有一条：**远端记录 → 映射 → 本地待办 → 映射 → 远端记录**。中间没有队列、没有中间库、没有额外进程。
 
+### v2：hub 也可以站在数据链路里（全部可选）
+
+上面的描述是 v1 的默认形态。v2 给 hub 增加了三个代理能力，每项都是显式 opt-in、不配 hub 时行为与 v1 完全一致：
+
+| 能力 | 开关 | 作用 |
+| --- | --- | --- |
+| file-manager | `config.fileProxy: hub` | todos.json 的读写改走 hub（revision CAS，多实例安全），插件侧 `lib/fileproxy.js` 与本地 store 同接口；hub 缺失时 fail-fast 不静默回落 |
+| request 代理 | 连接器里 `executor.via: hub` | REST 出站请求经 hub 转发：SSRF 防护、`${secret:ALIAS}` 在 hub 侧解析（明文令牌不进 harness 进程）、限流与审计 |
+| task-watcher | 连接器里 `watcher: hub` | 定时调度权交给 hub：到期抢租约后回调本机 sync 接口，本插件不再设本地定时器（强制 `everyMinutes: 0` 防双重触发） |
+
+设计文档与实现细节见 [docs/DESIGN-v2.md](docs/DESIGN-v2.md)；hub 侧的 API 表见 [hub/README.md](hub/README.md)。
+
 ---
 
 ## 与 dsh-global-todo 的关系

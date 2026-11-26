@@ -78,6 +78,7 @@ mapping:
 | `conflict` | 枚举 | 否 | `newer` | `newer` / `remote` / `local` |
 | `schedule.everyMinutes` | 整数 | 否 | `15` | `0`–`10080`。`0` 表示不定时，只能手动触发 |
 | `schedule.onBoot` | 布尔 | 否 | `false` | 插件启动后延迟约 3 秒跑一次 |
+| `watcher` | 枚举 | 否 | 空 | 唯一合法值 `hub`（v2）：把定时调度权交给 hub 的 task-watcher，本机不再设定时器。**强制要求 `everyMinutes: 0`**，否则校验报「避免双重触发」；插件启动时向 hub 注册订阅（到期抢租约后回调本机 sync 接口）。需要插件已配置 hub |
 | `limits.maxPull` | 整数 | 否 | `200` | 单次 pull 最多处理多少条远端记录（`1`–`2000`） |
 | `limits.maxPush` | 整数 | 否 | `200` | 单次 push 最多推送多少条本地待办（`1`–`2000`） |
 
@@ -289,6 +290,7 @@ client:
 | `headers` | 映射 | 否 | 空 | 请求头，值支持变量插值 |
 | `timeoutMs` | 整数 | 否 | `20000` | `1000`–`600000` |
 | `followRedirects` | 布尔 | 否 | `true` | 设成 `false` 时不自动跟随 3xx（3xx 会按失败处理，除非 `success` 里列了它） |
+| `via` | 枚举 | 否 | 空 | 唯一合法值 `hub`（v2）：出站请求改经 hub 的 `POST /v1/request` 转发——SSRF 防护、`${secret:ALIAS}` 在 hub 侧解析、限流与审计。没配 hub 时使用它会**报错**（fail-fast，不静默回落直连） |
 
 **动作级字段**
 
@@ -325,6 +327,7 @@ YAML 里凡是字符串，基本都会在运行时渲染 `${...}` 占位符。
 | 占位符 | 得到 |
 | --- | --- |
 | `${env:NAME}` | 进程环境变量 `NAME`；不存在时是空字符串 |
+| `${secret:ALIAS}` | （v2，仅 `executor.via: hub` 时有意义）**原样透传**，占位符不动，由 hub 的 request 代理用它的 `secrets.json` 把别名换成真值。明文凭据因此不出现在插件进程里；不走 hub 时写这个占位符等于把字面量发给对方 |
 | `${now}` | 当前时间的 ISO-8601 字符串 |
 | `${today}` | 当前日期，`YYYY-MM-DD` |
 | `${connector.*}` | 连接器自身字段，如 `${connector.name}`、`${connector.label}` |

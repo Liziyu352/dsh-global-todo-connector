@@ -26,7 +26,10 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 DB_FILENAME = "hub.db"
-SCHEMA_VERSION = 1
+# 1 = connectors + leases + states + runs; 2 adds the file-manager revision
+# table and the watcher subscriptions.  Migrations are incremental so an old
+# database keeps working after an upgrade.
+SCHEMA_VERSION = 2
 
 # Contract limits.  Kept next to the storage layer so both the HTTP layer and
 # the tests can share them instead of duplicating magic numbers.
@@ -157,6 +160,10 @@ class Store:
                 )
             if version < 1:
                 conn.executescript(_SCHEMA_V1)
+            if version < 2:
+                # Incremental: an existing v1 deployment keeps its connectors,
+                # leases, states and runs and only gains the two new tables.
+                conn.executescript(_SCHEMA_V2)
 
     # ------------------------------------------------------------------
     # Connectors
@@ -434,6 +441,141 @@ class Store:
             return int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
 
     # ------------------------------------------------------------------
+    # Files (file-manager revision tracking)
+    # ------------------------------------------------------------------
+
+    def file_revision(self, name: str) -> int:
+        """Current revision of a virtual file; 0 means "never written here".
+
+        The file body lives on the real filesystem (so the upstream plugin can
+        keep reading it directly); SQLite only tracks the CAS token.
+        """
+
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT revision FROM files WHERE name = ?", (name,)
+            ).fetchone()
+        return int(row["revision"]) if row else 0
+
+    def file_mtime(self, name: str) -> Optional[str]:
+        with self._read() as conn:
+            row = conn.execute("SELECT mtime FROM files WHERE name = ?", (name,)).fetchone()
+        return row["mtime"] if row else None
+
+    def commit_file(
+        self, name: str, expected_revision: int, apply: "Any"
+    ) -> int:
+        """Run ``apply()`` and bump the revision, guarded by ``expected_revision``.
+
+        The side effect runs *inside* the IMMEDIATE transaction: holding the
+        write lock across one rename is cheap, and it removes the window where
+        two writers both pass the CAS check and race to replace the file.
+        """
+
+        now = utc_now()
+        with self._write() as conn:
+            row = conn.execute(
+                "SELECT revision FROM files WHERE name = ?", (name,)
+            ).fetchone()
+            current = int(row["revision"]) if row else 0
+            if expected_revision is not current:
+                raise RevisionConflict(current)
+            new_revision = current + 1
+            apply()
+            conn.execute(
+                "INSERT INTO files (name, revision, mtime) VALUES (?, ?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET "
+                "  revision = excluded.revision, mtime = excluded.mtime",
+                (name, new_revision, now),
+            )
+        return new_revision
+
+    # ------------------------------------------------------------------
+    # Watchers (task-watcher subscriptions)
+    # ------------------------------------------------------------------
+
+    def list_watchers(self) -> list[dict[str, Any]]:
+        with self._read() as conn:
+            rows = conn.execute(
+                "SELECT connector, every_minutes, callback_url, instance, enabled, "
+                "next_run_at FROM watchers ORDER BY connector ASC"
+            ).fetchall()
+        return [_watcher_row(row) for row in rows]
+
+    def get_watcher(self, connector: str) -> Optional[dict[str, Any]]:
+        with self._read() as conn:
+            row = conn.execute(
+                "SELECT connector, every_minutes, callback_url, instance, enabled, "
+                "next_run_at FROM watchers WHERE connector = ?",
+                (connector,),
+            ).fetchone()
+        return _watcher_row(row) if row else None
+
+    def put_watcher(
+        self,
+        connector: str,
+        every_minutes: int,
+        callback_url: str,
+        instance: str,
+        next_run_at: Optional[str],
+    ) -> dict[str, Any]:
+        """Create or replace a watcher; re-enables it and reschedules it."""
+
+        with self._write() as conn:
+            conn.execute(
+                "INSERT INTO watchers "
+                "(connector, every_minutes, callback_url, instance, enabled, next_run_at) "
+                "VALUES (?, ?, ?, ?, 1, ?) "
+                "ON CONFLICT(connector) DO UPDATE SET "
+                "  every_minutes = excluded.every_minutes, "
+                "  callback_url = excluded.callback_url, "
+                "  instance = excluded.instance, "
+                "  enabled = 1, "
+                "  next_run_at = excluded.next_run_at",
+                (connector, every_minutes, callback_url, instance, next_run_at),
+            )
+            row = conn.execute(
+                "SELECT connector, every_minutes, callback_url, instance, enabled, "
+                "next_run_at FROM watchers WHERE connector = ?",
+                (connector,),
+            ).fetchone()
+        return _watcher_row(row)
+
+    def delete_watcher(self, connector: str) -> bool:
+        with self._write() as conn:
+            cursor = conn.execute("DELETE FROM watchers WHERE connector = ?", (connector,))
+            return cursor.rowcount > 0
+
+    def due_watchers(self, now_iso: Optional[str] = None) -> list[dict[str, Any]]:
+        """Enabled watchers whose ``next_run_at`` has come due.
+
+        ISO-8601 UTC strings sort lexicographically because they all carry the
+        same ``+00:00`` offset, so a plain string comparison is enough here.
+        """
+
+        threshold = now_iso or utc_now()
+        with self._read() as conn:
+            rows = conn.execute(
+                "SELECT connector, every_minutes, callback_url, instance, enabled, "
+                "next_run_at FROM watchers "
+                "WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ? "
+                "ORDER BY next_run_at ASC",
+                (threshold,),
+            ).fetchall()
+        return [_watcher_row(row) for row in rows]
+
+    def set_watcher_next_run(self, connector: str, next_run_at: Optional[str]) -> None:
+        with self._write() as conn:
+            conn.execute(
+                "UPDATE watchers SET next_run_at = ? WHERE connector = ?",
+                (next_run_at, connector),
+            )
+
+    def count_watchers(self) -> int:
+        with self._read() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM watchers").fetchone()[0])
+
+    # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------
 
@@ -512,6 +654,44 @@ CREATE INDEX IF NOT EXISTS idx_runs_connector_id ON runs(connector, id DESC);
 PRAGMA user_version = 1;
 COMMIT;
 """
+
+
+_SCHEMA_V2 = """
+BEGIN IMMEDIATE;
+
+-- Only the CAS token lives in SQLite; the JSON document itself stays on the
+-- filesystem so the plugin's direct reads keep working ("原版优先").
+CREATE TABLE IF NOT EXISTS files (
+    name     TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    mtime    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS watchers (
+    connector     TEXT PRIMARY KEY,
+    every_minutes INTEGER NOT NULL,
+    callback_url  TEXT NOT NULL,
+    instance      TEXT NOT NULL,
+    enabled       INTEGER NOT NULL DEFAULT 1,
+    next_run_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_watchers_due ON watchers(enabled, next_run_at);
+
+PRAGMA user_version = 2;
+COMMIT;
+"""
+
+
+def _watcher_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "connector": row["connector"],
+        "everyMinutes": int(row["every_minutes"]),
+        "callbackUrl": row["callback_url"],
+        "instance": row["instance"],
+        "enabled": bool(row["enabled"]),
+        "nextRunAt": row["next_run_at"],
+    }
 
 
 def _connector_summary(row: sqlite3.Row) -> dict[str, Any]:
