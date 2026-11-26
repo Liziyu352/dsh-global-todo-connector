@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Global Todo Connector">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#e0f2fe" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+
+  <!-- left: the harness-side list -->
+  <rect x="9" y="16" width="22" height="32" rx="5" fill="url(#card)"/>
+  <path d="M13.5 24.5l2.6 2.6 4.6-5" fill="none" stroke="#0f766e" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M23.5 24h3.5" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+  <path d="M13.5 33.5l2.6 2.6 4.6-5" fill="none" stroke="#0f766e" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M23.5 33h3.5" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+  <path d="M15 41h10" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- middle: the connector bridge -->
+  <path d="M33 26c4.5-5 9-7 13-7" fill="none" stroke="#fff" stroke-width="2.4"
+        stroke-linecap="round" stroke-dasharray="1 4.4"/>
+  <path d="M33 42c4.5 5 9 7 13 7" fill="none" stroke="#fff" stroke-width="2.4"
+        stroke-linecap="round" stroke-dasharray="1 4.4"/>
+  <path d="M33 34h13" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M42 30l4 4-4 4" fill="none" stroke="#fff" stroke-width="2.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="35.5" cy="34" r="2.2" fill="#fff"/>
+
+  <!-- right: the external system -->
+  <circle cx="50" cy="34" r="8.5" fill="none" stroke="#fff" stroke-width="2.4" opacity="0.95"/>
+  <circle cx="50" cy="34" r="3" fill="#fff" opacity="0.95"/>
+  <path d="M50 21.5v5M50 41.5v5M37.5 34h5M57.5 34h5" stroke="#fff" stroke-width="2"
+        stroke-linecap="round" opacity="0.8"/>
+</svg>

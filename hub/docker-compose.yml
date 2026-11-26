@@ -1,0 +1,19 @@
+services:
+  hub:
+    build: .
+    container_name: dsh-connector-hub
+    restart: unless-stopped
+    # Keep the hub private: bind to loopback on the host unless you really
+    # need LAN access. Change to "8765:8765" only behind a private network.
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      # Set a long random token; without it the hub only accepts loopback,
+      # which inside a container means almost nothing gets through.
+      GTC_HUB_TOKEN: "${GTC_HUB_TOKEN:?set GTC_HUB_TOKEN in .env or the shell}"
+      GTC_HUB_DATA: /data
+    volumes:
+      - hub-data:/data
+
+volumes:
+  hub-data:

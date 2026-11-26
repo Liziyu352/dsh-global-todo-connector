@@ -1,0 +1,70 @@
+# TaskWarrior — bidirectional, command executor.
+#
+# TaskWarrior is the friendliest place to start: it has a real CLI, it speaks
+# JSON, and it already stores its tasks in a file you own.
+#
+#   task export                     → a JSON array of tasks
+#   task import -                   → reads JSON on stdin
+#
+# Enable it by flipping `enabled` to true once `dsh_connector_validate` passes.
+version: 1
+
+connector:
+  name: taskwarrior
+  label: TaskWarrior
+  description: 把全局待办与 TaskWarrior 双向同步
+  enabled: false
+  direction: both
+  conflict: newer
+  schedule:
+    everyMinutes: 15
+    onBoot: true
+  limits:
+    maxPull: 200
+    maxPush: 200
+
+client:
+  name: taskwarrior
+  priority: normal
+  project: inbox
+  tags:
+    - taskwarrior
+  executor:
+    kind: cmd
+    pull:
+      run: task status:pending export
+      timeoutMs: 20000
+      parse: json
+    push:
+      run: task import -
+      timeoutMs: 20000
+      stdin: batch
+
+mapping:
+  pull:
+    id: uuid
+    title: description
+    description: annotations.0.description
+    status:
+      path: status
+      map:
+        pending: open
+        waiting: doing
+        completed: done
+        deleted: cancelled
+    priority:
+      path: priority
+      map:
+        H: urgent
+        M: high
+        L: low
+    tags: tags
+    dueAt: due
+    updatedAt: modified
+  push:
+    description: "${todo.title}"
+    status:
+      pending: "${todo.status}"
+    priority: "${todo.priority}"
+    due: "${todo.dueAt}"
+    tags: "${todo.tags}"

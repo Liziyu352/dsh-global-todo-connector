@@ -1,0 +1,45 @@
+# A tiny JSON clock — push-only, command executor.
+#
+# The simplest useful connector: every push appends one JSON array — the batch
+# of todos that changed — to a local file. It exists so you can see the whole
+# lifecycle (write → validate → sync → inspect the file) without any external
+# service or token.
+#
+#   dsh_connector_write  name: notes  yaml: <this file>
+#   dsh_connector_sync   name: notes
+#   cat ~/.dsh/global-todo-connector/notes-log.json   # one array per push
+version: 1
+
+connector:
+  name: notes
+  label: 本地笔记
+  description: 把待办推到本地文件，用来确认整条链路能跑通
+  enabled: false
+  direction: push
+  conflict: local
+  schedule:
+    everyMinutes: 0
+    onBoot: false
+  limits:
+    maxPush: 200
+
+client:
+  name: notes
+  priority: normal
+  tags:
+    - notes
+  executor:
+    kind: cmd
+    push:
+      run: cat >> "${env:HOME}/.dsh/global-todo-connector/notes-log.json"
+      timeoutMs: 5000
+      stdin: batch
+
+mapping:
+  push:
+    id: "${remoteId}"
+    title: "${todo.title}"
+    status: "${todo.status}"
+    priority: "${todo.priority}"
+    dueAt: "${todo.dueAt}"
+    updatedAt: "${todo.updatedAt}"

@@ -1,0 +1,9 @@
+# Docker ignores everything not copied explicitly in this build context.
+# Keeping the context at hub/ itself means the Node project root (node_modules,
+# test fixtures) never gets sent to the daemon.
+**/.git
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+data/
+*.db

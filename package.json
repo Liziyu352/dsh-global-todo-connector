@@ -1,0 +1,67 @@
+{
+  "name": "dsh-global-todo-connector",
+  "version": "0.1.0",
+  "description": "Connect DeepSeek Harness' global todo list to external todo systems (Feishu, DingTalk, TaskWarrior, Todoist, any REST API) through YAML-defined connectors.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Liziyu352 <Liziyu352@users.noreply.github.com>",
+  "homepage": "https://github.com/Liziyu352/dsh-global-todo-connector#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Liziyu352/dsh-global-todo-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Liziyu352/dsh-global-todo-connector/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "todo",
+    "taskwarrior",
+    "feishu",
+    "dingtalk",
+    "todoist",
+    "connector"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "locale/",
+    "docs/",
+    "examples/",
+    "hub/",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.3-0 <0.3.0"
+  },
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:hub": "python3 -m pytest hub/tests -q"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "dsh-global-todo": ">=0.23.0 <0.24.0"
+  },
+  "peerDependenciesMeta": {
+    "dsh-global-todo": {
+      "optional": true
+    }
+  }
+}

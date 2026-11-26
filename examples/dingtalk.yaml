@@ -1,0 +1,67 @@
+# DingTalk — pull-only, REST executor with query parameters.
+#
+# DingTalk's task API is paginated; `executor.pull.query` shows how to pass
+# parameters without hard-coding them in the path. `success` widens the accepted
+# status codes because some DingTalk endpoints answer 200 with an error body
+# instead of a 4xx.
+#
+# The token comes from the environment so this file is safe to commit.
+#
+#   export DINGTALK_TOKEN=xxxxxxxx
+version: 1
+
+connector:
+  name: dingtalk
+  label: 钉钉待办
+  description: 从钉钉待办拉取到本地
+  enabled: false
+  direction: pull
+  conflict: remote
+  schedule:
+    everyMinutes: 30
+    onBoot: false
+  limits:
+    maxPull: 100
+
+client:
+  name: dingtalk
+  priority: normal
+  project: 工作
+  tags:
+    - dingtalk
+  executor:
+    kind: rest
+    baseUrl: https://api.dingtalk.com
+    headers:
+      x-acs-dingtalk-access-token: ${env:DINGTALK_TOKEN}
+      Content-Type: application/json
+    timeoutMs: 20000
+    pull:
+      method: POST
+      path: /v1.0/todo/users/me/workspaces
+      query: {}
+      body:
+        pageSize: 100
+      timeoutMs: 20000
+      success:
+        - 200
+
+mapping:
+  pull:
+    id: id
+    title: subject
+    description: description
+    dueAt: dueTime
+    status:
+      path: done
+      map:
+        false: open
+        true: done
+    priority:
+      path: priority
+      map:
+        "10": urgent
+        "20": high
+        "30": normal
+        "40": low
+    updatedAt: modifiedTime

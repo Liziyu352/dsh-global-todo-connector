@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "全局待办连接器",
+    "description": "用 YAML 连接器把全局待办接到外部系统——飞书、钉钉、TaskWarrior、Todoist 或任意 REST API。",
+    "detail": "docs/CONNECTORS.md"
+  }
+}

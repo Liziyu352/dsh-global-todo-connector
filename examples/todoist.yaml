@@ -1,0 +1,78 @@
+# Todoist — bidirectional, REST executor.
+#
+# This file doubles as the reference for the `rest` executor:
+#
+#   * `baseUrl` + per-action `method`/`path` build the URL.
+#   * Headers are rendered from `${env:...}`, so the token never lives in the
+#     YAML file that you might commit.
+#   * `items` names the array inside the response.
+#   * `mapping.pull` maps Todoist's vocabulary onto DSH's (open/doing/done/
+#     cancelled/archived, urgent/high/normal/low).
+#   * `mapping.push` is a template tree: the keys become the JSON body.
+#
+#   export TODOIST_TOKEN=xxxxxxxx
+#
+# Then flip `enabled: true`.
+version: 1
+
+connector:
+  name: todoist
+  label: Todoist
+  description: 把全局待办与 Todoist 双向同步
+  enabled: false
+  direction: both
+  conflict: newer
+  schedule:
+    everyMinutes: 30
+    onBoot: false
+  limits:
+    maxPull: 200
+    maxPush: 100
+
+client:
+  name: todoist
+  priority: normal
+  project: inbox
+  tags:
+    - todoist
+  executor:
+    kind: rest
+    baseUrl: https://api.todoist.com/rest/v2
+    headers:
+      Authorization: Bearer ${env:TODOIST_TOKEN}
+      Accept: application/json
+    timeoutMs: 20000
+    pull:
+      method: GET
+      path: /tasks
+      timeoutMs: 20000
+    push:
+      method: POST
+      path: /tasks
+      body: null
+
+mapping:
+  pull:
+    id: id
+    title: content
+    description: description
+    dueAt: due.datetime
+    status:
+      path: checked
+      map:
+        false: open
+        true: done
+    priority:
+      path: priority
+      map:
+        "1": low
+        "2": normal
+        "3": high
+        "4": urgent
+    tags: labels
+  push:
+    content: "${todo.title}"
+    description: "${todo.description}"
+    due_datetime: "${todo.dueAt}"
+    priority: "${todo.priority}"
+    labels: "${todo.tags}"

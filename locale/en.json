@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Global Todo Connector",
+    "description": "Sync the global todo list with external systems through YAML connectors — Feishu, DingTalk, TaskWarrior, Todoist, or any REST API.",
+    "detail": "docs/CONNECTORS.md"
+  }
+}

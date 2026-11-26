@@ -1,0 +1,19 @@
+# Layer inserted by this bundle.
+#
+# The entry id is `global-todo-connector`; a profile may override the config by
+# targeting that id, or switch the plugin off entirely with `disabled: true`.
+# Config is replaced as a whole (no deep merge), so list every key you rely on.
+- insert:
+    - id: global-todo-connector
+      name: dsh-global-todo-connector
+      config:
+        storePath: ''
+        dataDir: ''
+        hub:
+          url: ''
+          token: ''
+          instance: ''
+          timeoutMs: 8000
+        tools: true
+        routes: true
+        schedule: true

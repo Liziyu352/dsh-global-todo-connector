@@ -1,0 +1,65 @@
+# Feishu / Lark — pull-only, command executor.
+#
+# Two ways to talk to Feishu:
+#
+#   1. The official lark-cli, if you already use it (`lark-cli bitable records`).
+#   2. Any script you write yourself, as long as it prints JSON on stdout.
+#
+# This example uses a small helper script (~/.local/bin/feishu-tasks) that
+# prints an array of records; the YAML does not care how it is implemented.
+# The value of this shape is that the connector file stays a description of
+# intent, not a pile of HTTP plumbing.
+#
+# Pull-only on purpose: pushing into a shared team base is a decision a human
+# should make, so this connector only reads. Switch `direction` to `both` and
+# add `client.executor.push` when you want it to write back.
+version: 1
+
+connector:
+  name: feishu
+  label: 飞书任务
+  description: 只从飞书任务表拉取到本地，不写回
+  enabled: false
+  direction: pull
+  conflict: remote
+  schedule:
+    everyMinutes: 15
+    onBoot: true
+  limits:
+    maxPull: 200
+
+client:
+  name: feishu
+  priority: normal
+  project: 工作
+  tags:
+    - feishu
+  executor:
+    kind: cmd
+    pull:
+      run: feishu-tasks --format json
+      timeoutMs: 30000
+      parse: json
+
+mapping:
+  pull:
+    id: record_id
+    title: fields.任务名称
+    description: fields.描述
+    dueAt: fields.截止时间
+    status:
+      path: fields.状态
+      map:
+        未开始: open
+        进行中: doing
+        已完成: done
+        已取消: cancelled
+    priority:
+      path: fields.优先级
+      map:
+        紧急: urgent
+        高: high
+        中: normal
+        低: low
+    tags: fields.标签
+    updatedAt: last_modified_time

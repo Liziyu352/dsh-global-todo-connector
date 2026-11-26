@@ -1,0 +1,8 @@
+# Runtime dependencies for the optional local Connector Hub.
+# Pinned so a hub started today behaves the same next month.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+
+# Test-only dependency. Install with:
+#   pip install -r hub/requirements.txt httpx==0.28.1 pytest==8.3.4
