@@ -56,7 +56,7 @@ test('the module exports the shape a DSH host bundle expects', () => {
   assert.equal(name, 'dsh-global-todo-connector')
   assert.equal(VERSION, '0.1.0')
   assert.equal(typeof apply, 'function')
-  assert.deepEqual(DEFAULT_CONFIG_KEYS, ['storePath', 'dataDir', 'hub', 'tools', 'routes', 'schedule'])
+  assert.deepEqual(DEFAULT_CONFIG_KEYS, ['storePath', 'dataDir', 'hub', 'fileProxy', 'tools', 'routes', 'schedule'])
 })
 
 test('resolveConfig fills defaults without clobbering a partial config', () => {
